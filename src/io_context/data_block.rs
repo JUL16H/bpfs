@@ -7,8 +7,8 @@ pub struct ReadOnlyBlock {
     data: Rc<RefCell<Vec<u8>>>,
 }
 
-impl From<&Rc<RefCell<Vec<u8>>>> for ReadOnlyBlock {
-    fn from(value: &Rc<RefCell<Vec<u8>>>) -> Self {
+impl From<Rc<RefCell<Vec<u8>>>> for ReadOnlyBlock {
+    fn from(value: Rc<RefCell<Vec<u8>>>) -> Self {
         Self {
             data: value.clone(),
         }
@@ -25,8 +25,8 @@ pub struct MutableBlock {
     data: Rc<RefCell<Vec<u8>>>,
 }
 
-impl From<&Rc<RefCell<Vec<u8>>>> for MutableBlock {
-    fn from(value: &Rc<RefCell<Vec<u8>>>) -> Self {
+impl From<Rc<RefCell<Vec<u8>>>> for MutableBlock {
+    fn from(value: Rc<RefCell<Vec<u8>>>) -> Self {
         Self {
             data: value.clone(),
         }

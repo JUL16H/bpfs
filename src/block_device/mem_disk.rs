@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use super::BlockDevice;
 
 #[derive(Debug)]
@@ -30,6 +32,14 @@ pub enum MemDiskIOError {
     IdxOutOfRange { idx: usize, max: usize },
     MismachedBufferSize { size: usize },
 }
+
+impl Display for MemDiskIOError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for MemDiskIOError {}
 
 impl BlockDevice for MemDisk {
     type Error = MemDiskIOError;

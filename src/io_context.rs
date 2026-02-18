@@ -30,36 +30,33 @@ where
     }
 
     pub fn get(&mut self, sector_idx: u64) -> Result<ReadOnlyBlock, D::Error> {
-        if self.cache.peek(sector_idx).is_none() {
-            let mut v = vec![0u8; D::BLOCK_SIZE as usize];
-            self.disk.borrow_mut().read(sector_idx, &mut v)?;
-            let v = Rc::new(RefCell::new(v));
-            if let Some(entry) = self.cache.put(sector_idx, v) {
-                self.flush_block(entry)?;
-            }
+        if let Some(block) = self.cache.get(&sector_idx, false) {
+            return Ok(block.clone().into());
         }
-        Ok(self
-            .cache
-            .get(&sector_idx)
-            .expect("WTF. That's impossible.")
-            .into())
+
+        let mut v = vec![0u8; D::BLOCK_SIZE as usize];
+        self.disk.borrow_mut().read(sector_idx, &mut v)?;
+        let v = Rc::new(RefCell::new(v.clone()));
+        if let Some(entry) = self.cache.put(sector_idx, v.clone(), false) {
+            self.flush_block(entry)?;
+        }
+
+        Ok(v.into())
     }
 
     pub fn get_mut(&mut self, sector_idx: u64) -> Result<MutableBlock, D::Error> {
-        if self.cache.peek(sector_idx).is_none() {
-            let mut v = vec![0u8; D::BLOCK_SIZE as usize];
-            self.disk.borrow_mut().read(sector_idx, &mut v)?;
-            let v = Rc::new(RefCell::new(v));
-            if let Some(entry) = self.cache.put(sector_idx, v) {
-                self.flush_block(entry)?;
-            }
+        if let Some(block) = self.cache.get(&sector_idx, true) {
+            return Ok(block.clone().into());
         }
-        self.cache.mark_dirty(&sector_idx);
-        Ok(self
-            .cache
-            .get(&sector_idx)
-            .expect("WTF. That's impossible.")
-            .into())
+
+        let mut v = vec![0u8; D::BLOCK_SIZE as usize];
+        self.disk.borrow_mut().read(sector_idx, &mut v)?;
+        let v = Rc::new(RefCell::new(v.clone()));
+        if let Some(entry) = self.cache.put(sector_idx, v.clone(), true) {
+            self.flush_block(entry)?;
+        }
+
+        Ok(v.into())
     }
 
     fn flush_block(&self, entry: (u64, Rc<RefCell<Vec<u8>>>, bool)) -> Result<(), D::Error> {
