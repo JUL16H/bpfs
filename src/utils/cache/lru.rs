@@ -1,5 +1,6 @@
+use ahash::AHashMap;
+
 use super::Cache;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -15,7 +16,7 @@ struct Node<K, V> {
 pub struct LRU<K, V> {
     cap: u64,
     nodes: Vec<Node<K, V>>,
-    map: HashMap<K, u64>,
+    map: AHashMap<K, u64>,
     head: Option<u64>,
 }
 
@@ -25,7 +26,7 @@ impl<K: Clone + Hash + Eq, V> Cache<K, V> for LRU<K, V> {
         Self {
             cap,
             nodes: Vec::with_capacity(cap as usize),
-            map: HashMap::with_capacity(cap as usize),
+            map: AHashMap::with_capacity(cap as usize),
             head: None,
         }
     }
@@ -111,7 +112,14 @@ impl<K: Clone + Hash + Eq, V> Cache<K, V> for LRU<K, V> {
             None
         }
     }
+
+    fn clear(&mut self) {
+        self.nodes.clear();
+        self.map.clear();
+        self.head = None;
+    }
 }
+
 impl<K: Debug, V: Debug> Debug for LRU<K, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(head) = self.head {

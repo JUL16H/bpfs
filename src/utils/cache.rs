@@ -8,4 +8,5 @@ pub trait Cache<K, V> {
     fn is_empty(&self) -> bool;
     fn drain(&mut self) -> impl Iterator<Item = (K, V, bool)>;
     fn peek(&self, key: K) -> Option<&V>;
+    fn clear(&mut self);
 }

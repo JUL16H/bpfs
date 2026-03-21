@@ -26,30 +26,30 @@ where
         }
     }
 
-    pub fn get(&mut self, sector_idx: u64) -> Result<ReadOnlyBlock, BlockDeviceError> {
-        if let Some(block) = self.cache.get(&sector_idx, false) {
+    pub fn get(&mut self, block_idx: u64) -> Result<ReadOnlyBlock, BlockDeviceError> {
+        if let Some(block) = self.cache.get(&block_idx, false) {
             return Ok(block.clone().into());
         }
 
         let mut v = vec![0u8; self.block_size as usize];
-        self.disk.borrow_mut().read(sector_idx, &mut v)?;
-        let v = Rc::new(RefCell::new(v.clone()));
-        if let Some(entry) = self.cache.put(sector_idx, v.clone(), false) {
+        self.disk.borrow_mut().read(block_idx, &mut v)?;
+        let v = Rc::new(RefCell::new(v));
+        if let Some(entry) = self.cache.put(block_idx, v.clone(), false) {
             self.flush_block(entry)?;
         }
 
         Ok(v.into())
     }
 
-    pub fn get_mut(&mut self, sector_idx: u64) -> Result<MutableBlock, BlockDeviceError> {
-        if let Some(block) = self.cache.get(&sector_idx, true) {
+    pub fn get_mut(&mut self, block_idx: u64) -> Result<MutableBlock, BlockDeviceError> {
+        if let Some(block) = self.cache.get(&block_idx, true) {
             return Ok(block.clone().into());
         }
 
         let mut v = vec![0u8; self.block_size as usize];
-        self.disk.borrow_mut().read(sector_idx, &mut v)?;
-        let v = Rc::new(RefCell::new(v.clone()));
-        if let Some(entry) = self.cache.put(sector_idx, v.clone(), true) {
+        self.disk.borrow_mut().read(block_idx, &mut v)?;
+        let v = Rc::new(RefCell::new(v));
+        if let Some(entry) = self.cache.put(block_idx, v.clone(), true) {
             self.flush_block(entry)?;
         }
 
@@ -82,10 +82,14 @@ where
         let entries = &mut self.cache.drain();
         for entry in entries {
             if !entry.2 {
-                return Ok(());
+                continue;
             }
             disk.borrow_mut().write(entry.0, &entry.1.borrow_mut())?;
         }
         Ok(())
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
     }
 }

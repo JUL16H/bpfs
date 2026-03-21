@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use super::BlockAllocator;
 use crate::{
     IOContext,
-    block_allocator::BlockAllocateError,
+    block_allocator::{BlockAllocateError, none_allocator::NoneAllocator},
     block_device::BlockDevice,
     utils::{
         bp_tree::{BPTree, BPTreeError},
@@ -20,11 +20,10 @@ where
     bptree: BPTree<D, C, A>,
 }
 
-impl<D, C, A> BPTreeAllocator<D, C, A>
+impl<D, C> BPTreeAllocator<D, C, NoneAllocator>
 where
     D: BlockDevice,
     C: Cache<u64, Rc<RefCell<Vec<u8>>>>,
-    A: BlockAllocator,
 {
     pub fn try_new(ioc: Rc<RefCell<IOContext<D, C>>>, beg_block: u64) -> Result<Self, BPTreeError> {
         Ok(Self {
@@ -33,15 +32,14 @@ where
     }
 }
 
-impl<D, C, A> BlockAllocator for BPTreeAllocator<D, C, A>
+impl<D, C> BlockAllocator for BPTreeAllocator<D, C, NoneAllocator>
 where
     D: BlockDevice,
     C: Cache<u64, Rc<RefCell<Vec<u8>>>>,
-    A: BlockAllocator,
 {
     fn alloc(&mut self) -> Result<u64, BlockAllocateError> {
         self.bptree
-            .pop_first_extent_block()
+            .pop_first_extent()
             .map_err(|_| BlockAllocateError::NoFreeBlocks)
     }
 

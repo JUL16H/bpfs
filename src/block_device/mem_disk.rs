@@ -38,7 +38,7 @@ impl BlockDevice for MemDisk {
             });
         }
         if buffer.len() != self.get_block_size() as usize {
-            return Err(BlockDeviceError::MismachedBufferSize {
+            return Err(BlockDeviceError::MismatchedBufferSize {
                 size: buffer.len() as u64,
             });
         }
@@ -55,7 +55,7 @@ impl BlockDevice for MemDisk {
             });
         }
         if data.len() != BLOCK_SIZE as usize {
-            return Err(BlockDeviceError::MismachedBufferSize {
+            return Err(BlockDeviceError::MismatchedBufferSize {
                 size: data.len() as u64,
             });
         }

@@ -15,7 +15,7 @@ pub enum BlockDeviceError {
     #[error("Index out of range: idx {idx}, max {max}")]
     IdxOutOfRange { idx: u64, max: u64 },
     #[error("Mismached buffer size: {size}")]
-    MismachedBufferSize { size: u64 },
+    MismatchedBufferSize { size: u64 },
     #[error("IO Error: {0}")]
     IOError(#[from] std::io::Error),
 }

@@ -4,8 +4,10 @@ use std::rc::Rc;
 mod bp_tree_node;
 
 use thiserror::Error;
+use zerocopy::FromBytes;
 use zerocopy::little_endian::U64;
 
+use crate::block_allocator::none_allocator::NoneAllocator;
 use crate::block_allocator::{BlockAllocateError, BlockAllocator};
 use crate::block_device::BlockDeviceError;
 use crate::io_context::IOContext;
@@ -20,6 +22,7 @@ where
     io_context: Rc<RefCell<IOContext<D, C>>>,
     root_block: Option<u64>,
     first_leaf: u64,
+    is_block_manager: bool,
     allocator: Option<Rc<RefCell<A>>>,
     m: u64,
 }
@@ -36,6 +39,8 @@ pub enum BPTreeError {
     AllocateError(#[from] BlockAllocateError),
     #[error("Empty tree")]
     EmptyTree,
+    #[error("Calling the extent method on a regular B+ tree")]
+    IllegalUse,
 }
 
 impl<D, C, A> BPTree<D, C, A>
@@ -44,40 +49,39 @@ where
     C: Cache<u64, Rc<RefCell<Vec<u8>>>>,
     A: BlockAllocator,
 {
-    pub fn new(ioc: Rc<RefCell<IOContext<D, C>>>, allocator: Option<Rc<RefCell<A>>>) -> Self {
+    pub fn new(ioc: Rc<RefCell<IOContext<D, C>>>, allocator: Rc<RefCell<A>>) -> Self {
         Self {
             io_context: ioc.clone(),
             root_block: None,
-            allocator,
+            is_block_manager: false,
+            allocator: Some(allocator),
             first_leaf: u64::MAX,
             m: (ioc.borrow_mut().get_disk_block_size() - size_of::<NodeHeader>() as u64) / 16,
         }
     }
 
-    pub fn new_as_block_manager(
-        io_context: Rc<RefCell<IOContext<D, C>>>,
-        beg_block: u64,
-    ) -> Result<Self, BPTreeError> {
-        let m: u64;
-        {
-            let mut ioc = io_context.borrow_mut();
-            m = (ioc.get_disk_block_size() - size_of::<NodeHeader>() as u64) / 16;
-            let block = ioc.get_mut(beg_block)?;
-            let mut block = block.get();
-            let nodeview = NodeViewMut::get_from_bytes(&mut block, m)?;
-            *nodeview.header = NodeHeader::new(true, 1);
-            nodeview.keys[0] = U64::new(beg_block + 1);
-            nodeview.vals[0] =
-                U64::new(ioc.get_disk_capacity() / ioc.get_disk_block_size() - beg_block - 1);
-        }
-        Ok(Self {
-            io_context,
-            root_block: Some(beg_block),
-            allocator: None,
-            first_leaf: beg_block,
-            m,
-        })
-    }
+    // pub fn try_new_with_block(
+    //     block_idx: u64,
+    //     ioc: Rc<RefCell<IOContext<D, C>>>,
+    //     allocator: Rc<RefCell<A>>,
+    // ) -> Result<Self, BPTreeError> {
+    //     let m = (ioc.borrow_mut().get_disk_block_size() - size_of::<NodeHeader>() as u64) / 16;
+    //     {
+    //         let mut ioc = ioc.borrow_mut();
+    //         let block = ioc.get_mut(block_idx)?;
+    //         let mut block = block.get();
+    //         let nodeview = NodeViewMut::get_from_bytes(&mut block, m)?; // 下一行不是改结构体的字段了吗，为什么不用标记mut
+    //         *nodeview.header = NodeHeader::new(true, 0);
+    //     };
+    //     Ok(Self {
+    //         io_context: ioc.clone(),
+    //         root_block: Some(block_idx),
+    //         is_block_manager: false,
+    //         allocator: Some(allocator),
+    //         first_leaf: block_idx,
+    //         m,
+    //     })
+    // }
 
     pub fn insert(&mut self, key: u64, val: u64) -> Result<(), BPTreeError> {
         if let Some(root_block) = self.root_block {
@@ -148,6 +152,40 @@ where
         }
     }
 
+    pub fn remove(&self, key: u64) -> Result<Option<u64>, BPTreeError> {
+        let mut cur_block: u64;
+        if let Some(root_block) = self.root_block {
+            cur_block = root_block;
+        } else {
+            return Ok(None);
+        }
+
+        loop {
+            let mut ioc = self.io_context.borrow_mut();
+            let block = ioc.get_mut(cur_block)?;
+            let mut block = block.get();
+            let nodeview = NodeViewMut::get_from_bytes(&mut block, self.m)?;
+
+            if nodeview.header.is_leaf == 1 {
+                let Ok(idx) = nodeview.keys[..nodeview.header.num_keys.get() as usize]
+                    .binary_search(&U64::new(key))
+                else {
+                    return Ok(None);
+                };
+                let val = nodeview.vals[idx].into();
+                let num_keys = nodeview.header.num_keys.get() as usize;
+                nodeview.keys[..num_keys].copy_within(idx + 1..num_keys, idx);
+                nodeview.vals[..num_keys].copy_within(idx + 1..num_keys, idx);
+                nodeview.header.num_keys -= 1;
+                return Ok(Some(val));
+            }
+
+            let idx = nodeview.keys[..nodeview.header.num_keys.get() as usize]
+                .partition_point(|&x| x.get() <= key);
+            cur_block = nodeview.vals[idx].get();
+        }
+    }
+
     fn insert_node(&mut self, block_idx: u64, key: u64, val: u64) -> Result<(), BPTreeError> {
         let (next_idx, needs_split) = {
             let mut ioc = self.io_context.borrow_mut();
@@ -191,10 +229,10 @@ where
     }
 
     fn alloc(&mut self) -> Result<u64, BPTreeError> {
-        if self.allocator.is_some() {
-            Ok(self.allocator.as_ref().unwrap().borrow_mut().alloc()?)
+        if self.is_block_manager {
+            self.pop_first_extent()
         } else {
-            self.pop_first_extent_block()
+            Ok(self.allocator.as_ref().unwrap().borrow_mut().alloc()?)
         }
     }
 
@@ -278,7 +316,10 @@ where
     }
 
     // TODO: 处理空盘块删除
-    pub fn pop_first_extent_block(&mut self) -> Result<u64, BPTreeError> {
+    pub fn pop_first_extent(&mut self) -> Result<u64, BPTreeError> {
+        if !self.is_block_manager {
+            return Err(BPTreeError::IllegalUse);
+        }
         let mut cur_block = self.first_leaf;
         loop {
             let mut ioc = self.io_context.borrow_mut();
@@ -307,20 +348,49 @@ where
         }
     }
 
+    // pub fn insert_extent(&)
+
     pub fn get_m(&self) -> u64 {
         self.m
     }
 }
 
+impl<D, C> BPTree<D, C, NoneAllocator>
+where
+    D: BlockDevice,
+    C: Cache<u64, Rc<RefCell<Vec<u8>>>>,
+{
+    pub fn new_as_block_manager(
+        io_context: Rc<RefCell<IOContext<D, C>>>,
+        beg_block: u64,
+    ) -> Result<Self, BPTreeError> {
+        let m: u64;
+        {
+            let mut ioc = io_context.borrow_mut();
+            m = (ioc.get_disk_block_size() - size_of::<NodeHeader>() as u64) / 16;
+            let block = ioc.get_mut(beg_block)?;
+            let mut block = block.get();
+            let nodeview = NodeViewMut::get_from_bytes(&mut block, m)?;
+            *nodeview.header = NodeHeader::new(true, 1);
+            nodeview.keys[0] = U64::new(beg_block + 1);
+            nodeview.vals[0] =
+                U64::new(ioc.get_disk_capacity() / ioc.get_disk_block_size() - beg_block - 1);
+        }
+        Ok(Self {
+            io_context,
+            root_block: Some(beg_block),
+            is_block_manager: true,
+            allocator: None,
+            first_leaf: beg_block,
+            m,
+        })
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::u8;
-
     use crate::{
-        block_allocator::{
-            bptree_allocator::BPTreeAllocator, none_allocator::NoneAllocator,
-            test_allocator::TestAllocator,
-        },
+        block_allocator::{bptree_allocator::BPTreeAllocator, none_allocator::NoneAllocator},
         block_device::mem_disk::MemDisk,
         utils::cache::lru::LRU,
     };
@@ -347,7 +417,7 @@ mod test {
             NoneAllocator,
         >::try_new(iocontext.clone(), 0)?));
 
-        let mut bptree = BPTree::new(iocontext.clone(), Some(allocator.clone()));
+        let mut bptree = BPTree::new(iocontext.clone(), allocator.clone());
         let m = bptree.get_m();
 
         for i in 0..64 * m {

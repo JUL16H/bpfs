@@ -8,7 +8,8 @@ pub struct NodeHeader {
     pub is_leaf: u8,
     _padding: [u8; 7],
     pub num_keys: U64,
-    pub next: U64, // 0 means nullptr
+    pub next: U64,
+    pub prev: U64,
 }
 
 #[derive(Error, Debug)]
@@ -30,6 +31,7 @@ impl NodeHeader {
             _padding: [0; 7],
             num_keys: num_keys.into(),
             next: U64::MAX_VALUE,
+            prev: U64::MAX_VALUE,
         }
     }
 }
